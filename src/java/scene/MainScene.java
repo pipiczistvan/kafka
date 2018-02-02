@@ -16,10 +16,13 @@ import piengine.object.camera.domain.CameraAttribute;
 import piengine.object.camera.domain.FirstPersonCamera;
 import piengine.object.canvas.domain.Canvas;
 import piengine.object.canvas.manager.CanvasManager;
+import piengine.object.skybox.domain.Skybox;
+import piengine.object.skybox.manager.SkyboxManager;
 import piengine.object.terrain.domain.Terrain;
 import piengine.object.terrain.manager.TerrainManager;
 import piengine.object.water.domain.Water;
 import piengine.object.water.manager.WaterManager;
+import piengine.visual.fog.Fog;
 import piengine.visual.framebuffer.domain.Framebuffer;
 import piengine.visual.framebuffer.manager.FramebufferManager;
 import piengine.visual.lighting.directional.light.domain.DirectionalLight;
@@ -57,12 +60,12 @@ public class MainScene extends Scene {
     private static final int TERRAIN_SCALE = 256;
     private static final int WATER_SCALE = TERRAIN_SCALE / 4;
     private static final float WAVE_SPEED = get(WATER_WAVE_SPEED);
-    private static final Color WATER_COLOR = createNormalizedColor(0, 203, 255);
+    private static final Color WATER_COLOR = createNormalizedColor(0, 255, 233);
     private static final Vector2i VIEWPORT = new Vector2i(get(WINDOW_WIDTH), get(WINDOW_HEIGHT));
 
     private static final Color SUN_COLOR = new Color(1.0f, 1.0f, 1.0f);
     private static final Color MIN_BIOM_COLOR = createNormalizedColor(48, 38, 22);
-    private static final Color MAX_BIOM_COLOR = createNormalizedColor(20, 255, 39);
+    private static final Color MAX_BIOM_COLOR = createNormalizedColor(0, 99, 1);
     private static final Color[] BIOM_COLORS = {
             interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.0f),
             interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.125f),
@@ -80,6 +83,7 @@ public class MainScene extends Scene {
     private final TerrainManager terrainManager;
     private final WaterManager waterManager;
     private final DirectionalLightManager directionalLightManager;
+    private final SkyboxManager skyboxManager;
 
     private CameraAsset cameraAsset;
     private Framebuffer mainFramebuffer;
@@ -88,13 +92,15 @@ public class MainScene extends Scene {
     private Terrain terrain;
     private Water water;
     private DirectionalLight sun;
+    private Fog fog;
+    private Skybox skybox;
 
     @Wire
     public MainScene(final RenderManager renderManager, final AssetManager assetManager,
                      final InputManager inputManager, final WindowManager windowManager,
                      final FramebufferManager framebufferManager, final CanvasManager canvasManager,
                      final TerrainManager terrainManager, final WaterManager waterManager,
-                     final DirectionalLightManager directionalLightManager) {
+                     final DirectionalLightManager directionalLightManager, final SkyboxManager skyboxManager) {
         super(renderManager, assetManager);
 
         this.inputManager = inputManager;
@@ -104,6 +110,7 @@ public class MainScene extends Scene {
         this.terrainManager = terrainManager;
         this.waterManager = waterManager;
         this.directionalLightManager = directionalLightManager;
+        this.skyboxManager = skyboxManager;
     }
 
     @Override
@@ -118,9 +125,8 @@ public class MainScene extends Scene {
 
     @Override
     protected void createAssets() {
-        terrain = terrainManager.supply(new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 10, TERRAIN_SCALE), "heightmap3", BIOM_COLORS);
-        water = waterManager.supply(VIEWPORT, new Vector2i(WATER_SCALE, WATER_SCALE), new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 0, TERRAIN_SCALE), WATER_COLOR);
-
+        terrain = terrainManager.supply(new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 5, TERRAIN_SCALE), "hm", BIOM_COLORS);
+        water = waterManager.supply(VIEWPORT, new Vector2i(WATER_SCALE, WATER_SCALE), new Vector3f(-TERRAIN_SCALE / 2, -2, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 0, TERRAIN_SCALE), WATER_COLOR);
 
         cameraAsset = createAsset(CameraAsset.class, new CameraAssetArgument(
                 terrain,
@@ -137,10 +143,21 @@ public class MainScene extends Scene {
 
         sun = directionalLightManager.supply(this, SUN_COLOR, camera, new Vector2i(2048));
         sun.setPosition(1000, 1000, 300);
+
+        skybox = skyboxManager.supply(150f,
+                "skybox/bkg1_right",
+                "skybox/bkg1_left",
+                "skybox/bkg1_top",
+                "skybox/bkg1_bot",
+                "skybox/bkg1_back",
+                "skybox/bkg1_front");
+
+        fog = new Fog(ColorUtils.BLACK, 0.015f, 1.5f);
     }
 
     @Override
     public void update(final float delta) {
+        skybox.addRotation(0.5f * delta);
         water.waveFactor += WAVE_SPEED * delta;
     }
 
@@ -151,7 +168,7 @@ public class MainScene extends Scene {
                 .bindFrameBuffer(
                         mainFramebuffer,
                         WorldRenderPlanBuilder
-                                .createPlan(camera)
+                                .createPlan(camera, fog, skybox)
                                 .loadAssetContext(
                                         WorldRenderAssetContextBuilder
                                                 .create()
