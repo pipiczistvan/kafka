@@ -18,6 +18,8 @@ import piengine.object.canvas.domain.Canvas;
 import piengine.object.canvas.manager.CanvasManager;
 import piengine.object.terrain.domain.Terrain;
 import piengine.object.terrain.manager.TerrainManager;
+import piengine.object.water.domain.Water;
+import piengine.object.water.manager.WaterManager;
 import piengine.visual.framebuffer.domain.Framebuffer;
 import piengine.visual.framebuffer.manager.FramebufferManager;
 import piengine.visual.lighting.directional.light.domain.DirectionalLight;
@@ -30,6 +32,7 @@ import piengine.visual.window.manager.WindowManager;
 import puppeteer.annotation.premade.Wire;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_CONTROL;
 import static piengine.core.base.type.property.ApplicationProperties.get;
 import static piengine.core.base.type.property.PropertyKeys.CAMERA_FAR_PLANE;
 import static piengine.core.base.type.property.PropertyKeys.CAMERA_FOV;
@@ -38,8 +41,9 @@ import static piengine.core.base.type.property.PropertyKeys.CAMERA_LOOK_SPEED;
 import static piengine.core.base.type.property.PropertyKeys.CAMERA_LOOK_UP_LIMIT;
 import static piengine.core.base.type.property.PropertyKeys.CAMERA_MOVE_SPEED;
 import static piengine.core.base.type.property.PropertyKeys.CAMERA_NEAR_PLANE;
-import static piengine.core.base.type.property.PropertyKeys.CAMERA_VIEWPORT_HEIGHT;
-import static piengine.core.base.type.property.PropertyKeys.CAMERA_VIEWPORT_WIDTH;
+import static piengine.core.base.type.property.PropertyKeys.WATER_WAVE_SPEED;
+import static piengine.core.base.type.property.PropertyKeys.WINDOW_HEIGHT;
+import static piengine.core.base.type.property.PropertyKeys.WINDOW_WIDTH;
 import static piengine.core.input.domain.KeyEventType.PRESS;
 import static piengine.core.utils.ColorUtils.createNormalizedColor;
 import static piengine.core.utils.ColorUtils.interpolateColors;
@@ -50,17 +54,22 @@ import static piengine.visual.postprocessing.domain.EffectType.ANTIALIAS_EFFECT;
 
 public class MainScene extends Scene {
 
-    private static final int TERRAIN_SCALE = 512;
-    private static final Vector2i VIEWPORT = new Vector2i(get(CAMERA_VIEWPORT_WIDTH), get(CAMERA_VIEWPORT_HEIGHT));
+    private static final int TERRAIN_SCALE = 256;
+    private static final int WATER_SCALE = TERRAIN_SCALE / 4;
+    private static final float WAVE_SPEED = get(WATER_WAVE_SPEED);
+    private static final Color WATER_COLOR = createNormalizedColor(0, 203, 255);
+    private static final Vector2i VIEWPORT = new Vector2i(get(WINDOW_WIDTH), get(WINDOW_HEIGHT));
 
     private static final Color SUN_COLOR = new Color(1.0f, 1.0f, 1.0f);
-    private static final Color MIN_BIOM_COLOR = createNormalizedColor(0, 255, 200);
-    private static final Color MAX_BIOM_COLOR = createNormalizedColor(100, 255, 255);
+    private static final Color MIN_BIOM_COLOR = createNormalizedColor(48, 38, 22);
+    private static final Color MAX_BIOM_COLOR = createNormalizedColor(20, 255, 39);
     private static final Color[] BIOM_COLORS = {
             interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.0f),
-            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.25f),
+            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.125f),
+            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.375f),
             interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.5f),
-            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.75f),
+            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.625f),
+            interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 0.875f),
             interpolateColors(MIN_BIOM_COLOR, MAX_BIOM_COLOR, 1.0f),
     };
 
@@ -69,6 +78,7 @@ public class MainScene extends Scene {
     private final FramebufferManager framebufferManager;
     private final CanvasManager canvasManager;
     private final TerrainManager terrainManager;
+    private final WaterManager waterManager;
     private final DirectionalLightManager directionalLightManager;
 
     private CameraAsset cameraAsset;
@@ -76,13 +86,15 @@ public class MainScene extends Scene {
     private Canvas mainCanvas;
     private Camera camera;
     private Terrain terrain;
+    private Water water;
     private DirectionalLight sun;
 
     @Wire
     public MainScene(final RenderManager renderManager, final AssetManager assetManager,
                      final InputManager inputManager, final WindowManager windowManager,
                      final FramebufferManager framebufferManager, final CanvasManager canvasManager,
-                     final TerrainManager terrainManager, final DirectionalLightManager directionalLightManager) {
+                     final TerrainManager terrainManager, final WaterManager waterManager,
+                     final DirectionalLightManager directionalLightManager) {
         super(renderManager, assetManager);
 
         this.inputManager = inputManager;
@@ -90,6 +102,7 @@ public class MainScene extends Scene {
         this.framebufferManager = framebufferManager;
         this.canvasManager = canvasManager;
         this.terrainManager = terrainManager;
+        this.waterManager = waterManager;
         this.directionalLightManager = directionalLightManager;
     }
 
@@ -97,11 +110,17 @@ public class MainScene extends Scene {
     public void initialize() {
         super.initialize();
         inputManager.addEvent(GLFW_KEY_ESCAPE, PRESS, windowManager::closeWindow);
+        inputManager.addEvent(GLFW_KEY_RIGHT_CONTROL, PRESS, () -> {
+            cameraAsset.lookingEnabled = !cameraAsset.lookingEnabled;
+            windowManager.setCursorVisibility(!cameraAsset.lookingEnabled);
+        });
     }
 
     @Override
     protected void createAssets() {
-        terrain = terrainManager.supply(new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 40, TERRAIN_SCALE), "heightmap4", BIOM_COLORS);
+        terrain = terrainManager.supply(new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 10, TERRAIN_SCALE), "heightmap3", BIOM_COLORS);
+        water = waterManager.supply(VIEWPORT, new Vector2i(WATER_SCALE, WATER_SCALE), new Vector3f(-TERRAIN_SCALE / 2, 0, -TERRAIN_SCALE / 2), new Vector3f(TERRAIN_SCALE, 0, TERRAIN_SCALE), WATER_COLOR);
+
 
         cameraAsset = createAsset(CameraAsset.class, new CameraAssetArgument(
                 terrain,
@@ -121,8 +140,8 @@ public class MainScene extends Scene {
     }
 
     @Override
-    public void update(float v) {
-
+    public void update(final float delta) {
+        water.waveFactor += WAVE_SPEED * delta;
     }
 
     @Override
@@ -137,6 +156,7 @@ public class MainScene extends Scene {
                                         WorldRenderAssetContextBuilder
                                                 .create()
                                                 .loadTerrains(terrain)
+                                                .loadWaters(water)
                                                 .loadDirectionalLights(sun)
                                                 .build()
                                 )
@@ -151,5 +171,15 @@ public class MainScene extends Scene {
                 )
                 .clearScreen(ColorUtils.BLACK)
                 .render();
+    }
+
+    @Override
+    public void resize(final int width, final int height) {
+        VIEWPORT.x = width;
+        VIEWPORT.y = height;
+
+        camera.recalculateProjection();
+        framebufferManager.resize(mainFramebuffer, VIEWPORT);
+        canvasManager.recreateEffects(mainCanvas);
     }
 }
